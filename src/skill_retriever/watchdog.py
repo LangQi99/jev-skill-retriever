@@ -24,7 +24,8 @@ from typing import Optional
 from collections import deque
 from datetime import datetime, timezone
 
-from skill_retriever.compose import compose_skills, _flat_index, _discover_hermes_llm_config, FLAT_INDEX_PATH
+from skill_retriever.config import FLAT_INDEX_PATH
+from skill_retriever.compose import compose_skills, _flat_index, _discover_hermes_llm_config
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
 Wires one behaviour via the Hermes plugin system:
 
     pre_llm_call hook — on each user query, runs the AgentSkillOS retrieval
-    pipeline (capability tree + LLM node selection) and injects top-5 skill
+    pipeline (capability tree + LLM node selection) and injects top-15 skill
     hints into the user message as natural-language instructions.
 
 Modes:
@@ -47,7 +47,7 @@ def _get_scanner():
 
 
 def _get_searcher():
-    """Lazy-load the Searcher singleton from skill_retriever.
+    """Lazy-load the Searcher singleton from skill-retriever.
 
     On first call, initializes the Searcher with the capability tree
     and loads skill metadata. The tree is built once and cached to disk.
@@ -111,6 +111,17 @@ def _get_searcher():
     return _searcher
 
 
+# ── Composer ────────────────────────────────────────────────────────────
+
+def _get_composer_flat_index_path():
+    """Return the path to the flat index cache."""
+    from pathlib import Path
+    return Path.home() / ".hermes" / "skill-retriever-cache" / "flat_index.json"
+
+
+# Hook lives below after _build_hint_block etc.
+
+
 # ── Intent classification ──────────────────────────────────────────────
 
 # Intent detection: keyword pattern → intent label.
@@ -153,6 +164,13 @@ _CAPABILITY_CHAINS: dict[str, list[tuple[str, int, str]]] = {
         ("search-first", 3, "research existing tools before building custom"),
         ("web-app-factory", 3, "repeatable web app build workflow"),
         ("docker-patterns", 3, "containerize if deploying"),
+        ("deployment-patterns", 3, "CI/CD pipelines, health checks, rollback"),
+        ("systematic-debugging", 3, "root cause analysis when builds fail"),
+        ("deep-think", 4, "loop-based structured reasoning for hard problems"),
+        ("spike", 4, "throwaway experiments to validate ideas before building"),
+        ("git-workflow", 4, "branch strategy, commits, PR conventions"),
+        ("benchmark", 4, "measure performance baselines before and after changes"),
+        ("context-engineering", 4, "optimize context window usage for large builds"),
     ],
     "code_review": [
         ("code-quality-audit", 1, "structured code quality and security checks"),
@@ -161,6 +179,15 @@ _CAPABILITY_CHAINS: dict[str, list[tuple[str, int, str]]] = {
         ("fec-e2e-testing", 2, "real-browser E2E tests with Playwright"),
         ("playwright-best-practices", 3, "battle-tested testing patterns"),
         ("dogfood", 3, "exploratory QA and bug hunting"),
+        ("test-master", 3, "comprehensive test strategy and coverage analysis"),
+        ("browser-automation", 3, "automate browser interactions for visual QA"),
+        ("systematic-debugging", 4, "4-phase root cause for any bugs found"),
+        ("deep-think", 4, "loop-based reasoning on complex code decisions"),
+        ("code-refactoring", 4, "refactoring patterns and techniques"),
+        ("context-engineering", 4, "prompt optimization for code analysis"),
+        ("benchmark", 4, "measure performance impact of code changes"),
+        ("langsmith-observability", 5, "trace LLM calls during code review"),
+        ("assistant-avatar-extension", 5, "build browser extension for code review"),
     ],
     "large_refactor": [
         ("codebase-exploration", 1, "semantic search to understand the codebase"),
@@ -168,17 +195,45 @@ _CAPABILITY_CHAINS: dict[str, list[tuple[str, int, str]]] = {
         ("subagent-driven-development", 2, "parallel subagents for independent files"),
         ("test-driven-development", 2, "tests before and after refactoring"),
         ("systematic-debugging", 3, "4-phase root cause if the refactor exposes bugs"),
+        ("code-refactoring", 3, "refactoring patterns and techniques"),
+        ("test-master", 3, "verify test coverage during and after refactor"),
+        ("deep-think", 4, "loop-based structured reasoning for complex changes"),
+        ("context-engineering", 4, "optimize context for large codebase refactors"),
+        ("benchmark", 4, "measure before/after performance of refactored code"),
+        ("spike", 4, "throwaway experiments to test refactor approaches"),
+        ("search-first", 4, "research existing patterns before refactoring"),
+        ("git-workflow", 4, "commit strategy for large refactors"),
+        ("code-quality-audit", 4, "quality gate before and after refactor"),
+        ("langgraph", 5, "graph-based workflows for complex refactor orchestration"),
     ],
     "deploy": [
         ("deployment-patterns", 1, "CI/CD, Docker, health checks, rollback"),
         ("cloudflare-tunnel", 2, "expose local services via Cloudflare"),
         ("code-quality-audit", 2, "pre-deploy quality gate"),
         ("canary-watch", 3, "post-deploy monitoring for regressions"),
+        ("docker-patterns", 3, "container best practices for production"),
+        ("systematic-debugging", 3, "diagnose deployment failures"),
+        ("benchmark", 4, "measure performance after deploy"),
+        ("git-workflow", 4, "tagging, releases, deployment branches"),
+        ("web-quality-audit", 4, "Core Web Vitals and accessibility checks"),
+        ("ui-qa-pipeline", 4, "visual regression testing post-deploy"),
+        ("cloudflare-tunnel-persistence", 5, "persistent tunnels with monitoring"),
+        ("nextjs-deployment-patches", 5, "fix Next.js deployment issues"),
+        ("vercel-deployment", 5, "Vercel-specific deployment patterns"),
+        ("devops", 5, "infrastructure and ops best practices"),
+        ("inngest", 5, "serverless job queues for background deploy tasks"),
+    ],
+    "general": [
+        ("skill-retrieval-system", 1, "understand how skill retrieval works and why it matters"),
+        ("skill-creator-ms", 2, "create, update, and curate agent skills"),
+        ("skills-list", 2, "discover all available skills"),
+        ("skill-curation", 2, "curate and maintain the skill library"),
+        ("skill-router", 2, "route tasks to the right skill"),
+        ("planning-and-task-breakdown", 4, "break complex work into ordered steps"),
     ],
 }
 
 # Behavioral nudge snippets: one-line imperatives per intent
-# Injected after the skill hints to bridge the selection→execution gap.
 _BEHAVIORAL_NUDGES: dict[str, str] = {
     "large_build": (
         "For multi-file builds: plan the architecture first, "
@@ -197,6 +252,10 @@ _BEHAVIORAL_NUDGES: dict[str, str] = {
     "deploy": (
         "For deploys: verify all tests pass, run pre-deploy quality checks, "
         "ensure health-check endpoints exist, monitor for regressions after shipping."
+    ),
+    "general": (
+        "For general tasks: check skill-retrieval-system first to understand "
+        "how retrieval works, then use skills-list to discover relevant skills."
     ),
 }
 
@@ -253,40 +312,114 @@ def _build_hint_block(
 def _on_pre_llm_call(*, user_message: str = "", **_kwargs) -> dict | None:
     """Run skill retrieval and inject hints into the user message.
 
-    Two pathways, both fire independently:
-      1. LLM tree navigation (Searcher) — if available, augments the bundle
-      2. Capability chain injection — intent-aware bundles (primary path)
-
-    This hook fires before every LLM turn. Hints are prepended to the
-    user message as natural-language instructions.
+    Primary pathway: Composer (flat index + single LLM call).
+    Fallback: Static capability chains if Composer unavailable.
     """
     if os.environ.get(_DISABLE_ENV, "").lower() in ("1", "true", "yes"):
         return None
+
+    # ── Continuation / compaction-rehydration handler ────────────────
+    # Must fire BEFORE the empty/short-message early return because
+    # continuation prompts ("continue", "next", "") are the dominant
+    # failure pattern after context compaction (50% of skill-retriever
+    # misses according to the 30-day audit; see Issue #71058 / PR #71077
+    # for the upstream compaction seam).
+    try:
+        from skill_retriever.vague_gate import handle_continuation
+
+        _continuation_result = handle_continuation(
+            conversation_history=_kwargs.get("conversation_history") or [],
+            user_message=user_message or "",
+        )
+        if _continuation_result is not None:
+            return _continuation_result
+    except Exception:
+        logger.debug("skill-retriever: continuation handler unavailable (non-fatal)")
+
     if not user_message or not user_message.strip():
         return None
     if len(user_message.strip()) < 10:
         return None
 
+    # ── Vague-prompt deepthink gate (opt-in) ────────────────────────
+    if os.environ.get("SKILL_RETRIEVER_DEEPTHINK_GATE", "0").lower() in ("1", "true", "yes"):
+        _gate_vague = False
+        try:
+            from skill_retriever.vague_gate import (
+                is_vague_prompt,
+                log_vague_prompt,
+                _get_top_candidate_names,
+            )
+
+            # Static heuristics (1 & 2)
+            _gate_vague = is_vague_prompt(user_message)
+
+            # Heuristic 3: composer pre_filter returns 0 candidates
+            if not _gate_vague:
+                try:
+                    from skill_retriever.compose import _flat_index, _pre_filter
+                    skills = _flat_index()
+                    if skills:
+                        _gate_vague = not _pre_filter(skills, user_message, top_k=1)
+                except Exception:
+                    pass  # non-fatal — fall through
+
+            if _gate_vague:
+                cats = _get_top_candidate_names(user_message)
+                log_vague_prompt(user_message, cats)
+                logger.info(
+                    "skill-retriever: vague-prompt gate triggered – logged to skill_retriever_debug.log"
+                )
+        except Exception:
+            logger.debug("skill-retriever: vague-prompt gate unavailable (non-fatal)")
+
     try:
-        # ── Path 1: Intent-aware capability chain (always runs) ─────────
+        # ── Path 1: Composer (preferred — dynamic, query-aware) ────────
+        try:
+            from skill_retriever.compose import compose_skills, bundle_to_hint_block
+            bundle = compose_skills(user_message)
+            if bundle:
+                hint_block = bundle_to_hint_block(bundle)
+                logger.info(
+                    "skill-retriever: composer returned %d skills",
+                    len(bundle),
+                )
+                return {"context": hint_block}
+        except Exception as e:
+            logger.debug("skill-retriever composer failed: %s", e)
+
+        # ── Path 2: Static capability chains (fallback) ────────────────
         intent = _detect_intent(user_message)
         chain_skills = _CAPABILITY_CHAINS.get(intent, []) if intent else []
 
-        if not chain_skills:
-            return None
+        if chain_skills:
+            hint_block = _build_hint_block(chain_skills, intent)
+            logger.info(
+                "skill-retriever: fallback intent=%s chain_skills=%d",
+                intent, len(chain_skills),
+            )
+            return {"context": hint_block}
 
-        hint_block = _build_hint_block(chain_skills, intent)
+        # ── Path 3: General fallback (always inject something) ────────
+        # Even on composer failure or non-matched intent, inject general
+        # chain so the agent knows retrieval is alive but curator is down.
+        general_skills = _CAPABILITY_CHAINS.get("general", [])
+        if general_skills:
+            hint_block = _build_hint_block(general_skills, "general")
+            logger.warning(
+                "skill-retriever: composer failed and no specific intent — injecting general fallback"
+            )
+            return {"context": hint_block}
 
-        # ── Path 2 (skipped in hook — tree search is available via CLI) ─
-        # The deep AgentSkillOS tree search requires ~15-60s and is meant
-        # for the `skill-retriever search` CLI command, not the real-time
-        # pre_llm_call hook. Only the capability chain runs here.
-
-        logger.info(
-            "skill-retriever: intent=%s chain_skills=%d",
-            intent, len(chain_skills),
-        )
-        return {"context": hint_block}
+        # ── Last resort: diagnostic (should never happen) ──────────────
+        logger.warning("skill-retriever: all paths exhausted — injecting diagnostic")
+        return {
+            "context": (
+                "[Skill Retriever] ⚠️ No curated bundle available.\n"
+                "Composer and capability chains both failed.\n"
+                "Run `skills_list` to find skills manually."
+            )
+        }
 
     except Exception as e:
         logger.debug("skill-retriever hook failed (non-fatal): %s", e)

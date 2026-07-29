@@ -80,7 +80,9 @@ skill-retriever info
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for flat-index details, plugin wiring, and the reasoning model handling (LongCat-2.0 `reasoning_content` field).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full 3-path pipeline, plugin wiring, continuation handler, vague-prompt gate, quality feedback loop, and failure patterns.
+
+> 📐 [Architecture diagram (Excalidraw)](https://gist.github.com/ChonSong/f1f23335282e8dd6951d4dbcf18bf319) — drag the raw `.excalidraw` file onto [excalidraw.com](https://excalidraw.com) to view.
 
 ## System Requirements
 
