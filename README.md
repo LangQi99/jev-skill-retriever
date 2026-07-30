@@ -128,6 +128,14 @@ skill-retriever/
 - Bundle is capped to LLM token budget (max ~50 skills in prompt)
 - Reasoning models (LongCat-2.0, DeepSeek R1) return responses in `reasoning_content` — handled correctly
 
+## Local test
+
+```bash
+pip install -e ".[dev]"
+python3 -m pytest tests/ -v
+ruff check .
+```
+
 ## License
 
 MIT. Community skills may have separate licenses.

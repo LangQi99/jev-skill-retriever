@@ -1,0 +1,7 @@
+# gitleaks config for skill-retriever
+[allowlist]
+description = "Allow known test/non-secret values"
+regexes = [
+    "(?i)example\\.(com|org|net)",
+    "(?i)test-",
+]
