@@ -259,7 +259,10 @@ print(f"\n{'='*50}")
 print(f"Results:  {_tests_passed}/{_tests_run} passed")
 if _tests_passed == _tests_run:
     print("All tests passed  ✓")
-    sys.exit(0)
+    if __name__ == "__main__":
+        sys.exit(0)
 else:
     print(f"FAILURES: {_tests_run - _tests_passed}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        sys.exit(1)
+    raise AssertionError(f"{_tests_run - _tests_passed} vague-gate checks failed")

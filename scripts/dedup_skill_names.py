@@ -32,7 +32,12 @@ KNOWN_PREFIXES = ("affaan-m-", "sickn33-")
 
 
 def strip_prefix(name):
-    """Return (stripped_name, prefix) if name starts with a known prefix, else (name, None)."""
+    """Return a skill name without a known organization prefix."""
+    return _strip_prefix_with_source(name)[0]
+
+
+def _strip_prefix_with_source(name):
+    """Return ``(stripped_name, matched_prefix)`` for internal bookkeeping."""
     for prefix in KNOWN_PREFIXES:
         if name.startswith(prefix):
             return name[len(prefix):], prefix
@@ -74,7 +79,7 @@ def dedup_yaml_file(filepath, stats):
 
     for m in YAML_NAME_RE.finditer(text):
         old = m.group('prefix') + m.group('rest').strip()
-        stripped, prefix = strip_prefix(old)
+        stripped, prefix = _strip_prefix_with_source(old)
         stats["prefixed_found"] += 1
         if stripped in all_names:
             removes.add(old)
@@ -123,7 +128,7 @@ def dedup_skills_json_text(text, stats):
     modified = False
     for sk in skills:
         name = sk.get("name", "").strip()
-        stripped, prefix = strip_prefix(name)
+        stripped, prefix = _strip_prefix_with_source(name)
         if prefix:
             stats["prefixed_found"] += 1
             if stripped.lower() in seen:
@@ -169,7 +174,7 @@ def dedup_community_skill(filepath, stats):
         m = re.match(r'^(\s*name:\s*)(.+)$', line)
         if m:
             name = m.group(2).strip()
-            stripped, prefix = strip_prefix(name)
+            stripped, prefix = _strip_prefix_with_source(name)
             if prefix:
                 lines[i] = f"{m.group(1)}{stripped}"
                 stats["prefixed_found"] += 1

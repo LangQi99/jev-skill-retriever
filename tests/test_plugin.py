@@ -75,3 +75,14 @@ def test_plugin_register_mock():
     register(ctx)
     assert len(ctx.hooks) == 1
     assert ctx.hooks[0][0] == "pre_llm_call"
+
+
+def test_plugin_injects_no_match_hint(monkeypatch):
+    """A valid empty Jev result must not trigger unrelated static skills."""
+    from plugin.__init__ import _on_pre_llm_call
+
+    monkeypatch.setattr("skill_retriever.compose.compose_skills", lambda _query: [])
+    result = _on_pre_llm_call(user_message="Explain what a monad is in simple terms")
+
+    assert result is not None
+    assert "found no skill" in result["context"]

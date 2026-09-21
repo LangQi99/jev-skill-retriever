@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "skill-retriever"
-version = "0.3.0"
-description = "Composer-based skill retrieval for Hermes Agent. Pre-filters capability tree to flat index, single LLM call curates dynamic skill bundles per query."
+name = "jev-skill-retriever"
+version = "0.4.0"
+description = "Jev-powered structured skill recall for Hermes Agent with an LLM fallback."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 skill-retriever = "skill_retriever.cli_compose:main"
+jev-skill-retriever = "skill_retriever.cli_compose:main"
 
 [project.optional-dependencies]
 dev = [

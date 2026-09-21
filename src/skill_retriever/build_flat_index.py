@@ -10,8 +10,10 @@ import json
 import yaml
 from pathlib import Path
 
-TREE_PATH = Path.home() / ".hermes/plugins/skill-retriever/src/skill_retriever/capability_tree/tree_10000_ship_safe.yaml"
-OUT_DIR = Path.home() / ".hermes/skill-retriever-cache"
+from .config import CAPABILITY_TREE_PATH, SKILL_RETRIEVER_CACHE_DIR
+
+TREE_PATH = CAPABILITY_TREE_PATH
+OUT_DIR = SKILL_RETRIEVER_CACHE_DIR
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_PATH = OUT_DIR / "flat_index.json"
 
@@ -29,7 +31,7 @@ def walk_node(node, domain_path, results):
             "name": skill_name,
             "description": skill_desc[:500],
             "path": skill_path,
-            "tags": domain_path[-2:] if len(domain_path) >= 2 else domain_path,
+            "tags": domain_path,
             "skill_id": skill.get("id", ""),
         })
 

@@ -1,20 +1,10 @@
-#!/usr/bin/env python3
-"""Install skill-retriever as a Hermes plugin.
-
-Usage:
-    bash scripts/install.sh
-
-What it does:
-    1. Copies plugin/, src/, and community_skills/ to ~/.hermes/plugins/skill-retriever/
-    2. Installs Python dependencies into Hermes' venv
-    3. Enables the plugin in ~/.hermes/config.yaml
-    4. Prints system prompt configuration recommendations
-"""
+#!/usr/bin/env bash
+# Install jev-skill-retriever as a Hermes plugin.
 
 set -e
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-PLUGIN_NAME="skill-retriever"
+PLUGIN_NAME="jev-skill-retriever"
 PLUGIN_DEST="$HERMES_HOME/plugins/$PLUGIN_NAME"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
@@ -46,10 +36,12 @@ echo ""
 echo "  2/4  Installing dependencies..."
 VENV_PIP="$HERMES_HOME/hermes-agent/venv/bin/pip"
 if [ -f "$VENV_PIP" ]; then
+    HERMES_PYTHON="${VENV_PIP%/pip}/python"
     "$VENV_PIP" install chromadb litellm pyyaml python-dotenv rich --quiet 2>/dev/null && \
         echo "  ✅ Dependencies installed" || \
         echo "  ⚠️  Some deps failed — check manually: pip install chromadb litellm pyyaml python-dotenv rich"
 else
+    HERMES_PYTHON="python3"
     echo "  ⚠️  Hermes venv not found at $VENV_PIP"
     echo "     Install manually: pip install chromadb litellm pyyaml python-dotenv rich"
 fi
@@ -78,7 +70,7 @@ fi
 echo ""
 echo "  4/4  Verifying imports..."
 cd "$PLUGIN_DEST"
-python3 -c "
+PYTHONPATH="$PLUGIN_DEST/src" "$HERMES_PYTHON" -c "
 import sys
 sys.path.insert(0, 'src')
 try:
@@ -94,15 +86,18 @@ except ImportError as e:
     print('  Some features may be unavailable until missing deps are installed.')
 " || echo "  Import check failed (non-fatal)"
 
+SKILL_RETRIEVER_CACHE_DIR="$HERMES_HOME/skill-retriever-cache" \
+PYTHONPATH="$PLUGIN_DEST/src" \
+    "$HERMES_PYTHON" -m skill_retriever.build_flat_index
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ $PLUGIN_NAME installed!"
 echo ""
 echo "  Next steps:"
-echo "    1. Restart Hermes:  hermes gateway restart"
-echo "    2. Install community skills to your skills dir:"
-echo "       skill-retriever install"
-echo "    3. Verify:          skill-retriever audit"
+echo "    1. Add TYPESAFE_API_KEY to $HERMES_HOME/.env"
+echo "    2. Restart Hermes:  hermes gateway restart"
+echo "    3. Send a request and check the Hermes log for jev-skill-retriever"
 echo ""
 echo "  System prompt recommendations (see README):"
 echo "    - Ensure <available_skills> uses COMPACT format (categories + counts)"

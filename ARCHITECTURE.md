@@ -1,6 +1,6 @@
 # Architecture
 
-> **skill-retriever** is a Hermes Agent plugin that performs **dynamic skill curation** — turning a user query into a targeted 5-10 skill bundle in one LLM call. It uses a **3-path pipeline** with automatic fallback.
+> **jev-skill-retriever** is a Hermes Agent plugin that performs structured, multi-label skill recall with Jev and retains the original LLM composer as an automatic fallback.
 
 ## High-Level Flow
 
@@ -23,8 +23,8 @@
               ▼                 ▼                  ▼
    ┌──────────────────┐  ┌──────────────┐  ┌──────────────┐
    │ ★ Path 1:        │  │ ▸ Path 2:    │  │ · Path 3:    │
-   │   Composer       │  │   Static     │  │   General    │
-   │   (dynamic)      │  │   Chains     │  │   Fallback   │
+   │   Jev Recaller   │  │   Legacy LLM │  │   Static     │
+   │   (structured)   │  │   Composer   │  │   Fallback   │
    └──────┬───────────┘  └──────┬───────┘  └──────┬───────┘
           │                     │                  │
           └─────────────────────┼──────────────────┘
@@ -43,11 +43,23 @@
 
 All three paths run from `_on_pre_llm_call()` in `plugin/__init__.py:312`. They fire in strict precedence order:
 
-### ★ Path 1: Composer (Dynamic — Preferred)
+### ★ Path 1: Jev Recaller (Structured — Preferred)
+
+**File:** `src/skill_retriever/jev_recaller.py`
+
+1. Load the flat skill index.
+2. Rank the catalog with Choice questions, splitting oversized catalogs into concurrent batches.
+3. Take a small cross-batch shortlist and ask one independent Noul question per candidate.
+4. Apply the absolute Noul threshold and return up to `SKILL_RETRIEVER_JEV_MAX_RESULTS` skills.
+5. Validate every answer against its exact candidate ID before injecting hints.
+
+The result is multi-label and may be empty. A valid empty result suppresses static fallback so unrelated skills are not suggested.
+
+### ▸ Path 2: Legacy LLM Composer
 
 **File:** `src/skill_retriever/compose.py` (287 LOC)
 
-A single LLM call curates a query-specific skill bundle:
+Used when `SKILL_RETRIEVER_ENGINE=llm`, when `TYPESAFE_API_KEY` is absent, or when the Jev request fails. A single generative LLM call curates a query-specific skill bundle:
 
 1. **Load flat index** — reads `~/.hermes/skill-retriever-cache/flat_index.json` (~50KB, ~400 skills)
 2. **`_pre_filter()`** — cheap keyword match by token overlap against skill name + description + tags. Returns top 50 candidates. Applies:
@@ -133,6 +145,13 @@ Key configurable parameters:
 | Env Variable | Default | Description |
 |-------------|---------|-------------|
 | `SKILL_RETRIEVER_DISABLE` | — | Set `1` to disable entirely |
+| `TYPESAFE_API_KEY` | — | TypeSafe API key used by Jev |
+| `SKILL_RETRIEVER_ENGINE` | `jev` | `jev`, `auto`, or `llm` |
+| `SKILL_RETRIEVER_JEV_MODEL` | `jev-1.13.0` | Pinned Jev model |
+| `SKILL_RETRIEVER_JEV_THRESHOLD` | `0.35` | Minimum relevance probability |
+| `SKILL_RETRIEVER_JEV_SHORTLIST_SIZE` | `12` | Candidates verified by Noul |
+| `SKILL_RETRIEVER_JEV_BATCH_SIZE` | `180` | Skills per Choice request |
+| `SKILL_RETRIEVER_JEV_MAX_PARALLEL` | `4` | Concurrent Jev batches |
 | `SKILL_RETRIEVER_LLM_MODEL` | Hermes config → `gpt-4o-mini` | LLM model override |
 | `SKILL_RETRIEVER_CACHE_DIR` | `~/.hermes/skill-retriever-cache` | Cache directory |
 | `SKILL_RETRIEVER_TEMPERATURE` | `0.3` | LLM temperature |
@@ -199,7 +218,7 @@ log_skill_view(name, outcome_signal='useful'|'irrelevant'|'harmful')
 |-----------|---------|------------|
 | **50%** | Implicit continuation after compaction | Continuation handler at `__init__.py:321` |
 | **~25%** | Fresh vague prompt with <10 words | Logged by deepthink gate; falls to general |
-| **~15%** | Composer 0-candidate (no keyword overlap) | Falls to Path 2/3 |
+| **~15%** | Legacy composer 0-candidate (no keyword overlap) | Jev evaluates the indexed catalog directly |
 | **~10%** | Network/config errors | Caught and logged; non-fatal |
 
 ## Plugin Layer
@@ -212,10 +231,10 @@ Registers a single Hermes hook: `pre_llm_call`. Fires before every LLM turn:
 2. Continuation handler — intercept compaction restarts
 3. Early return on empty/short messages
 4. Vague-prompt gate (opt-in logging)
-5. Try Path 1 (Composer) → Path 2 (Static Chains) → Path 3 (General) → Diagnostic
+5. Try Jev → legacy LLM composer → static chains → general fallback → diagnostic
 6. Return `{"context": hint_block}` — prepended to user message
 
-**Borrow-mode:** LLM credentials auto-discovered from Hermes config. No separate API key needed.
+**Jev mode:** reads `TYPESAFE_API_KEY`. The legacy LLM fallback still auto-discovers credentials from Hermes config.
 
 ## CLI
 
@@ -241,7 +260,8 @@ skill-retriever/
 │       ├── __main__.py          ← CLI entry point
 │       ├── cli.py               ← CLI commands (search, rebuild, info)
 │       ├── cli_compose.py       ← CLI compose command (65 LOC)
-│       ├── compose.py           ← Composer: skill curation (287 LOC)
+│       ├── jev_recaller.py      ← Jev structured multi-skill recall
+│       ├── compose.py           ← Jev routing + legacy LLM fallback
 │       ├── config.py            ← Env-based config + LLM discovery (204 LOC)
 │       ├── vague_gate.py        ← Continuation handler + deepthink gate (394 LOC)
 │       ├── skill_usage_logger.py← JSONL usage tracking (79 LOC)

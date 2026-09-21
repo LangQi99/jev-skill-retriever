@@ -7,32 +7,39 @@
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT">
 </p>
 
-# Skill Retriever
+# Jev Skill Retriever
 
-> **Composer-based dynamic skill curation for Hermes Agent.**
+> **基于 Jev 的 Hermes Agent 技能召回插件 ｜ Jev-powered skill retrieval for Hermes Agent.**
 
-Walks a YAML capability tree once to build a flat index (~50KB, ~400 skills), then uses a **single LLM call** to curate a query-specific bundle of 3-20 skills — complete with load levels (★/▸/·), confidence scores, and reasoning.
+Jev evaluates the installed skill catalog with structured yes/no judgments and returns zero or more relevant skills. The original generative LLM composer remains available as a fallback.
 
-## Why Composer?
+Jev 对已安装技能并行进行结构化适用性判断，返回零个或多个相关技能；原有通用 LLM Composer 保留为故障回退。
 
-Old approach: recursive LLM tree descent (5 levels × branching 3 = **~243 calls/query**). Unusable for real-time.
+## Why Jev?
 
-New approach: flat index pre-filter → single LLM curation → **1 call/query**, sub-second latency.
+- Multi-label by design: a request may need no skill, one skill, or several skills.
+- Structured output: no generated JSON to parse or repair.
+- Progressive disclosure: Choice ranks the compact catalog, then independent Noul questions verify a small shortlist.
+- Safe fallback: missing credentials, timeouts, and API errors fall back to the existing LLM composer.
+
+See the [TypeSafe introduction](https://docs.typesafe.ai/introduction) and [skill suggestion cookbook](https://docs.typesafe.ai/cookbooks/skill_suggestion).
 
 ## How It Works
 
 ```
-User Query → flat index pre-filter (top 50) → LLM picks best 3-20 → inject hints
+User Query → Jev scores installed skills → threshold + top-K → inject hints
+                         ↘ failure → legacy LLM composer
 ```
 
-Each skill gets:
+Each recalled skill gets:
 
 | Field | Meaning |
 |-------|---------|
 | `name` | Skill name (call `skill_view(name)` to load) |
 | `load_as` | `must` ★ / `should` ▸ / `consider` · |
 | `confidence` | `high` / `medium` / `low` |
-| `reason` | Why this skill fits the query |
+| `score` | Jev Noul relevance probability |
+| `reason` | Existing skill description, used as a deterministic explanation |
 
 ### Hint Block (injected into user message)
 
@@ -50,8 +57,11 @@ Call skill_view('<name>') to load each one.
 ## Quick Start
 
 ```bash
-pip install skill-retriever
-skill-retriever install          # optional: install bundled community skills
+git clone https://github.com/LangQi99/jev-skill-retriever.git
+cd jev-skill-retriever
+pip install -e .
+export TYPESAFE_API_KEY="your-key"
+bash scripts/install.sh
 ```
 
 No plugin development needed — the Hermes plugin is registered automatically.
@@ -60,13 +70,13 @@ No plugin development needed — the Hermes plugin is registered automatically.
 
 ```bash
 # Rebuild the flat index (after adding new skills)
-skill-retriever rebuild
+jev-skill-retriever rebuild
 
 # Compose a bundle for a query
-skill-retriever compose "deploy a cloudflare tunnel"
+jev-skill-retriever compose "deploy a cloudflare tunnel"
 
 # Show index info
-skill-retriever info
+jev-skill-retriever info
 ```
 
 ## Integration Points
@@ -89,13 +99,22 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full 3-path pipeline, plugin wiri
 - Hermes Agent v0.18+
 - Python 3.10+
 - ~50MB for flat index
-- OpenAI-compatible LLM endpoint (LongCat, OpenAI, etc.)
+- TypeSafe API key for Jev; an OpenAI-compatible endpoint is optional for fallback
 
 ## Configuration
 
 | Env Variable | Default | Description |
 |-------------|---------|-------------|
 | `SKILL_RETRIEVER_DISABLE` | — | Set `1` to disable |
+| `TYPESAFE_API_KEY` | — | TypeSafe API key used by Jev |
+| `TYPESAFE_ENDPOINT` | `https://api.typesafe.ai` | TypeSafe API base URL |
+| `SKILL_RETRIEVER_ENGINE` | `jev` | `jev`, `auto`, or `llm` |
+| `SKILL_RETRIEVER_JEV_MODEL` | `jev-1.13.0` | Pinned Jev model |
+| `SKILL_RETRIEVER_JEV_THRESHOLD` | `0.35` | Minimum score for suggesting a skill |
+| `SKILL_RETRIEVER_JEV_MAX_RESULTS` | `10` | Maximum suggested skills |
+| `SKILL_RETRIEVER_JEV_SHORTLIST_SIZE` | `12` | Candidates verified with independent Noul questions |
+| `SKILL_RETRIEVER_JEV_BATCH_SIZE` | `180` | Skills ranked per Choice request |
+| `SKILL_RETRIEVER_JEV_MAX_PARALLEL` | `4` | Concurrent Jev requests |
 | `SKILL_RETRIEVER_LLM_MODEL` | from Hermes config | LLM model override |
 | `SKILL_RETRIEVER_LLM_API_KEY` | from Hermes config | API key |
 | `SKILL_RETRIEVER_LLM_BASE_URL` | from Hermes config | Base URL |
@@ -109,7 +128,8 @@ skill-retriever/
 ├── src/
 │   ├── skill_retriever/    # Core engine
 │   │   ├── cli_compose.py  # CLI (rebuild, compose, info)
-│   │   ├── compose.py      # Composer: skill curation (single LLM call)
+│   │   ├── jev_recaller.py # Structured multi-skill recall with Jev
+│   │   ├── compose.py      # Jev routing + legacy LLM fallback
 │   │   ├── config.py       # LLM discovery (borrow Hermes config)
 │   │   ├── build_flat_index.py
 │   │   ├── search/         # Tree search (CLI only, not for real-time)
@@ -124,9 +144,10 @@ skill-retriever/
 
 ## Trust & Safety
 
-- Composer prompts for **confidence per skill**
-- Bundle is capped to LLM token budget (max ~50 skills in prompt)
-- Reasoning models (LongCat-2.0, DeepSeek R1) return responses in `reasoning_content` — handled correctly
+- Jev output is validated against the exact indexed candidates.
+- Results are thresholded and capped before prompt injection.
+- A valid empty result is preserved as “no skill applies”; it does not trigger an unrelated fallback chain.
+- API failures are non-fatal and fall back to the original composer.
 
 ## License
 

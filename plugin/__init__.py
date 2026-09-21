@@ -1,15 +1,14 @@
-"""skill-retriever — AgentSkillOS-powered skill retrieval for Hermes Agent.
+"""jev-skill-retriever — Jev-powered skill retrieval for Hermes Agent.
 
 Wires one behaviour via the Hermes plugin system:
 
-    pre_llm_call hook — on each user query, runs the AgentSkillOS retrieval
-    pipeline (capability tree + LLM node selection) and injects top-15 skill
-    hints into the user message as natural-language instructions.
+    pre_llm_call hook — on each user query, ranks the installed skill catalog
+    with Jev, verifies a shortlist, and injects the relevant skill hints into
+    the user message as natural-language instructions.
 
 Modes:
-    Borrow-mode (default): Uses Hermes' active LLM credentials for the
-    retrieval gate. Reads OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL
-    from the environment. Zero additional configuration.
+    Jev (default): Uses TYPESAFE_API_KEY for structured recall.
+    LLM fallback: Borrows Hermes' active OpenAI-compatible credentials.
 
 Quirks:
     - pre_llm_call context is PREPENDED to the user message, not the system prompt.
@@ -19,7 +18,9 @@ Quirks:
 
 Env:
     SKILL_RETRIEVER_DISABLE=1        — disable entirely
-    SKILL_RETRIEVER_LLM_MODEL        — override LLM model (default: gpt-4o)
+    TYPESAFE_API_KEY                 — TypeSafe API key used by Jev
+    SKILL_RETRIEVER_ENGINE           — jev (default), auto, or llm
+    SKILL_RETRIEVER_JEV_MODEL        — pinned Jev model (default: jev-1.13.0)
     SKILL_RETRIEVER_CACHE_DIR        — override cache dir (default: ~/.hermes/skill-retriever-cache)
 """
 
@@ -312,8 +313,8 @@ def _build_hint_block(
 def _on_pre_llm_call(*, user_message: str = "", **_kwargs) -> dict | None:
     """Run skill retrieval and inject hints into the user message.
 
-    Primary pathway: Composer (flat index + single LLM call).
-    Fallback: Static capability chains if Composer unavailable.
+    Primary pathway: Jev Choice ranking + Noul shortlist verification.
+    Fallback: Legacy LLM composer, then static capability chains.
     """
     if os.environ.get(_DISABLE_ENV, "").lower() in ("1", "true", "yes"):
         return None
@@ -374,14 +375,21 @@ def _on_pre_llm_call(*, user_message: str = "", **_kwargs) -> dict | None:
             logger.debug("skill-retriever: vague-prompt gate unavailable (non-fatal)")
 
     try:
-        # ── Path 1: Composer (preferred — dynamic, query-aware) ────────
+        # ── Path 1: Jev recall, with legacy LLM fallback ───────────────
         try:
             from skill_retriever.compose import compose_skills, bundle_to_hint_block
             bundle = compose_skills(user_message)
-            if bundle:
+            if bundle is not None:
                 hint_block = bundle_to_hint_block(bundle)
+                if not hint_block:
+                    hint_block = (
+                        "[Skill Recall]\n\n"
+                        "Skill recall evaluated the installed catalog and found no skill "
+                        "that clearly applies to this request. Use your own judgment if "
+                        "the request explicitly names a skill.\n"
+                    )
                 logger.info(
-                    "skill-retriever: composer returned %d skills",
+                    "jev-skill-retriever: recall returned %d skills",
                     len(bundle),
                 )
                 return {"context": hint_block}

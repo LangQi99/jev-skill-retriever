@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""Skill Composer — single LLM call to curate a skill bundle from a query.
+"""Route skill recall through Jev with the legacy LLM composer as fallback.
 
-1. Cheap keyword pre-filter against flat_index.json (top 50 candidates)
-2. One LLM call: "from these 50, pick 5-10 with reasons and confidence"
-3. Returns bundle as JSON
-
-This replaces the hardcoded capability chains in the pre_llm_call hook.
-
-Closed loop: injects "previously useful for similar queries" context from
-skill-usage.jsonl, so the composer learns from past success/failure.
+Jev uses Choice to rank the catalog and Noul to verify a shortlist. The legacy
+path keyword-filters the flat index and asks one generative LLM call to return a
+JSON bundle. Usage history remains available to that fallback path.
 """
 import json
+import logging
+import os
 import re
 from pathlib import Path
 from typing import Optional
 
+import litellm
+
 from skill_retriever.config import (
     _discover_hermes_llm_config,
-    LLM_MODEL,
     LLM_MAX_RETRIES,
     SEARCH_TEMPERATURE,
-    SEARCH_TIMEOUT,
 )
-from concurrent.futures import ThreadPoolExecutor
+
+from .jev_recaller import JevRecallConfig, JevRecallError, JevSkillRecaller
 
 FLAT_INDEX_PATH = Path.home() / ".hermes/skill-retriever-cache/flat_index.json"
 USAGE_LOG_PATH = Path.home() / ".hermes/state/skill-usage.jsonl"
@@ -178,14 +176,39 @@ def _pre_filter(skills: list[dict], query: str, top_k: int = 50,
 def compose_skills(query: str) -> Optional[list[dict]]:
     """Curate a skill bundle for a user query.
 
-    Injects previously-useful skill context from usage history.
+    Uses Jev by default when TYPESAFE_API_KEY is configured. Falls back to the
+    original generative LLM composer when Jev is unavailable or when
+    SKILL_RETRIEVER_ENGINE=llm.
+
+    Injects previously-useful skill context from usage history in LLM mode.
     Returns list of skill bundle entries, or None on error.
     """
-    import litellm
+    engine = os.environ.get("SKILL_RETRIEVER_ENGINE", "jev").strip().lower()
+    if engine not in {"jev", "llm", "auto"}:
+        logging.getLogger(__name__).warning(
+            "Unknown SKILL_RETRIEVER_ENGINE=%s; using jev", engine
+        )
+        engine = "jev"
 
     skills = _flat_index()
     if not skills:
         return None
+
+    if engine in {"jev", "auto"}:
+        try:
+            config = JevRecallConfig.from_env()
+            if config.api_key:
+                bundle = JevSkillRecaller(config).recall(query, skills)
+                _log_bundle(bundle)
+                return bundle
+            if engine == "jev":
+                logging.getLogger(__name__).warning(
+                    "TYPESAFE_API_KEY is not configured; falling back to the LLM composer"
+                )
+        except (JevRecallError, ValueError) as error:
+            logging.getLogger(__name__).warning(
+                "Jev skill recall failed; falling back to the LLM composer: %s", error
+            )
 
     # Load usage history for feedback
     history = _load_usage_history()
@@ -200,7 +223,8 @@ def compose_skills(query: str) -> Optional[list[dict]]:
     previously_useful_text = "(none)"
     if previously_useful:
         previously_useful_text = "\n".join(
-            f"- {s['name']} (useful {s['useful_count']}/{s['total_count']}recent similar queries)"
+            f"- {s['name']} (useful {s['useful_count']}/{s['total_count']} "
+            "recent similar queries)"
             for s in previously_useful
         )
 
@@ -240,19 +264,23 @@ def compose_skills(query: str) -> Optional[list[dict]]:
             text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         bundle = json.loads(text)
-        # Auto-log each skill before returning (lightweight: one file write each)
-        from .skill_usage_logger import log_skill_view
-        for item in bundle:
-            log_skill_view(
-                item.get("name", "?"),
-                item.get("load_as", "consider"),
-                item.get("confidence", "high"),
-            )
+        _log_bundle(bundle)
         return bundle
     except Exception as e:
-        import logging
         logging.getLogger(__name__).warning("compose_skills failed: %s", e)
         return None
+
+
+def _log_bundle(bundle: list[dict]) -> None:
+    """Log suggested skills without coupling either recall engine to storage."""
+    from .skill_usage_logger import log_skill_view
+
+    for item in bundle:
+        log_skill_view(
+            item.get("name", "?"),
+            item.get("load_as", "consider"),
+            item.get("confidence", "high"),
+        )
 
 
 def bundle_to_hint_block(bundle: list[dict]) -> str:

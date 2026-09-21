@@ -1,6 +1,6 @@
-name: skill-retriever
-version: 1.0.0
-description: "AgentSkillOS-powered semantic skill retrieval for Hermes. Pre-filters 1,200+ skills to top-5 per query using capability tree + LLM gate. Borrow-mode uses existing Hermes LLMs — zero extra cost."
+name: jev-skill-retriever
+version: 0.4.0
+description: "Jev-powered structured skill recall for Hermes Agent, with the original LLM composer as fallback."
 author: "Hermes Skill Retriever Contributors"
 kind: backend
 hooks:
@@ -9,6 +9,21 @@ requires_env:
   - key: SKILL_RETRIEVER_DISABLE
     description: "Set to 1 to disable skill retrieval entirely"
     default: ""
+  - key: TYPESAFE_API_KEY
+    description: "TypeSafe API key used for Jev skill recall"
+    default: ""
+  - key: SKILL_RETRIEVER_ENGINE
+    description: "Recall engine: jev (default), auto, or llm"
+    default: "jev"
+  - key: SKILL_RETRIEVER_JEV_MODEL
+    description: "Pinned Jev model ID"
+    default: "jev-1.13.0"
+  - key: SKILL_RETRIEVER_JEV_THRESHOLD
+    description: "Minimum Jev Noul score for suggesting a skill"
+    default: "0.35"
+  - key: SKILL_RETRIEVER_JEV_SHORTLIST_SIZE
+    description: "Number of Choice-ranked candidates verified with Noul"
+    default: "12"
   - key: SKILL_RETRIEVER_LLM_MODEL
     description: "Override LLM model for skill retrieval gate (default: gpt-4o)"
     default: ""
