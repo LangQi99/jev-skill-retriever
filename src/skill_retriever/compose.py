@@ -18,11 +18,12 @@ from skill_retriever.config import (
     _discover_hermes_llm_config,
     LLM_MAX_RETRIES,
     SEARCH_TEMPERATURE,
+    SKILL_RETRIEVER_CACHE_DIR,
 )
 
 from .jev_recaller import JevRecallConfig, JevRecallError, JevSkillRecaller
 
-FLAT_INDEX_PATH = Path.home() / ".hermes/skill-retriever-cache/flat_index.json"
+FLAT_INDEX_PATH = SKILL_RETRIEVER_CACHE_DIR / "flat_index.json"
 USAGE_LOG_PATH = Path.home() / ".hermes/state/skill-usage.jsonl"
 
 # Minimum quality signals for a skill to be considered high-quality

@@ -116,8 +116,9 @@ def _get_searcher():
 
 def _get_composer_flat_index_path():
     """Return the path to the flat index cache."""
-    from pathlib import Path
-    return Path.home() / ".hermes" / "skill-retriever-cache" / "flat_index.json"
+    from skill_retriever.config import SKILL_RETRIEVER_CACHE_DIR
+
+    return SKILL_RETRIEVER_CACHE_DIR / "flat_index.json"
 
 
 # Hook lives below after _build_hint_block etc.
